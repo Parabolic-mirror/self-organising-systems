@@ -87,7 +87,7 @@ class CAModel:
       return tf.clip_by_value(x, min, max)
     qfunc = fake_quant if quantized else noquant
 
-    @tf.function
+    #### removed @tf.function
     def f(x, fire_rate=None, angle=0.0, step_size=1.0):
       y = perceive(x, angle)
       y = qfunc(y, min=-cfg.texture_ca.q, max=cfg.texture_ca.q)
@@ -112,10 +112,10 @@ class CAModel:
       v.assign(p)
 
   def save_params(self, filename):
-    with tf.io.gfile.GFile(filename, mode='wb') as f: 
-      np.save(f, self.get_params())
+    params = self.get_params()
+    np.savez(filename, *params)
 
   def load_params(self, filename):
-    with tf.io.gfile.GFile(filename, mode='rb') as f: 
-      params = np.load(f, allow_pickle=True)
-      self.set_params(params)
+    data = np.load(filename)
+    params = [data[key] for key in sorted(data.files)]
+    self.set_params(params)
