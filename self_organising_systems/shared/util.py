@@ -6,26 +6,33 @@ from tensorflow.io.gfile import GFile
 import io
 import base64
 import requests
-import PIL.Image, PIL.ImageDraw
+import PIL.ImageDraw
 import subprocess
+from PIL import Image
 
 
 def imread(url, max_size=None, mode=None):
+  # Load image from either URL or file
   if isinstance(url, str):
-    if url.startswith(('http:', 'https:')):
+    if url.startswith('http://') or url.startswith('https://'):
       r = requests.get(url)
       f = io.BytesIO(r.content)
     else:
       f = GFile(url, mode='rb')
   else:
-    f = url
-  img = PIL.Image.open(f)
-  if max_size is not None:
-    img.thumbnail((max_size, max_size), PIL.Image.ANTIALIAS)
-  if mode is not None:
-    img = img.convert(mode)
-  img = np.float32(img)/255.0
-  return img
+    f = url  # already a file-like object
+
+  img = Image.open(f)
+
+
+    if (max_size is not None) and (max_size > 0):
+        img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+
+    if mode is not None:
+        img = img.convert(mode)
+
+    return img
+
 
 
 def np2pil(a):
