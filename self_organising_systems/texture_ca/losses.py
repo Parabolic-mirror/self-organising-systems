@@ -15,7 +15,7 @@ class StyleModel:
     layers = style_layers + [content_layer]
     layers = {name:vgg.get_layer(name).output for name in layers}
     self.model = tf.keras.Model([vgg.input], layers)
-    self.style_img = imread(input_texture_path, cfg.texture_ca.vgg_input_img_size)
+    self.style_img = np.array(imread(input_texture_path, cfg.texture_ca.vgg_input_img_size))
     self.target_style, _ = self.calc_style_content(self.style_img[None,...])
 
   def run_model(self, img):
