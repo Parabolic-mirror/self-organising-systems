@@ -23,15 +23,13 @@ def imread(url, max_size=None, mode=None):
     f = url  # already a file-like object
 
   img = Image.open(f)
+  if (max_size is not None) and (max_size > 0):
+      img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
 
+  if mode is not None:
+      img = img.convert(mode)
 
-    if (max_size is not None) and (max_size > 0):
-        img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
-
-    if mode is not None:
-        img = img.convert(mode)
-
-    return img
+  return img
 
 
 
