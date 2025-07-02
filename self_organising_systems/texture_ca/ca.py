@@ -55,13 +55,51 @@ class DenseLayer:
     self.w = tf.Variable(w0)
 
   def embody(self):
-    w = fake_param_quant(self.w)
-    w, b = w[:-1], w[-1]
-    w = w[None, None, ...]
-    def f(x):
-      # TFjs matMul doesn't work with non-2d tensors, so using
-      # conv2d instead of 'tf.matmul(x, w)+b'
-      return tf.nn.conv2d(x, w, 1, 'VALID')+b
+    w_raw = fake_param_quant(self.w)
+    w_raw, b = w_raw[:-1], w_raw[-1]
+    w = w_raw[None, None, ...]  # [1, 1, in_channels, out_channels]
+    kernel_size = int(w.shape[0])
+  
+    def redistribute_channel(delta):
+      neighbor_count = tf.cast(kernel_size * kernel_size - 1, tf.float32)
+      safe_neighbor_count = tf.where(neighbor_count > 0, neighbor_count, tf.ones_like(neighbor_count))
+          
+      avg_delta = delta / safe_neighbor_count
+      avg_delta = tf.where(tf.math.is_finite(avg_delta), avg_delta, tf.zeros_like(avg_delta))
+  
+      kernel = tf.ones((kernel_size, kernel_size, 1, 1), dtype=tf.float32)
+      center = kernel_size // 2
+      kernel = tf.tensor_scatter_nd_update(
+        kernel,
+        indices=[[center, center, 0, 0]],
+        updates=[-1.0 * safe_neighbor_count]
+      )
+  
+      redistributed = tf.nn.conv2d(avg_delta, kernel, strides=1, padding='SAME')
+      redistributed = tf.where(tf.math.is_finite(redistributed), redistributed, tf.zeros_like(redistributed))
+      return redistributed
+
+    def f(x, w=w, b=b):
+        y = tf.nn.conv2d(x, w, strides=1, padding='VALID') + b
+    
+        rgb, rest = tf.split(y, [3, tf.shape(y)[-1] - 3], axis=-1)
+    
+        # Redistribute
+        r = redistribute_channel(rgb[..., 0:1])
+        g = redistribute_channel(rgb[..., 1:2])
+        b_ = redistribute_channel(rgb[..., 2:3])
+        rgb_conserved = tf.concat([r, g, b_], axis=-1)
+    
+        rest = tf.where(tf.math.is_finite(rest), rest, tf.zeros_like(rest))
+        rgb_conserved = tf.where(tf.math.is_finite(rgb_conserved), rgb_conserved, tf.zeros_like(rgb_conserved))
+    
+        output = tf.concat([rgb_conserved, rest], axis=-1)
+    
+        # 🧪 Inject nan-check diagnostic
+        tf.debugging.assert_all_finite(output, message="NaNs detected in CA output!")
+    
+        return output
+
     return f
 
 class CAModel:
@@ -87,7 +125,7 @@ class CAModel:
       return tf.clip_by_value(x, min, max)
     qfunc = fake_quant if quantized else noquant
 
-    @tf.function
+    #### removed @tf.function
     def f(x, fire_rate=None, angle=0.0, step_size=1.0):
       y = perceive(x, angle)
       y = qfunc(y, min=-cfg.texture_ca.q, max=cfg.texture_ca.q)
@@ -112,10 +150,10 @@ class CAModel:
       v.assign(p)
 
   def save_params(self, filename):
-    with tf.io.gfile.GFile(filename, mode='wb') as f: 
-      np.save(f, self.get_params())
+    params = self.get_params()
+    np.savez(filename, *params)
 
   def load_params(self, filename):
-    with tf.io.gfile.GFile(filename, mode='rb') as f: 
-      params = np.load(f, allow_pickle=True)
-      self.set_params(params)
+    data = np.load(filename)
+    params = [data[key] for key in sorted(data.files)]
+    self.set_params(params)
